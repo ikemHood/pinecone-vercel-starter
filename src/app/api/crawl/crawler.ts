@@ -1,5 +1,6 @@
-import cheerio from 'cheerio';
-import { NodeHtmlMarkdown } from 'node-html-markdown';
+import cheerio from "cheerio";
+import { NodeHtmlMarkdown } from "node-html-markdown";
+import pdf from "pdf-parse";
 
 interface Page {
   url: string;
@@ -11,7 +12,7 @@ class Crawler {
   private pages: Page[] = [];
   private queue: { url: string; depth: number }[] = [];
 
-  constructor(private maxDepth = 2, private maxPages = 1) { }
+  constructor(private maxDepth = 500, private maxPages = 10000) {}
 
   async crawl(startUrl: string): Promise<Page[]> {
     // Add the start URL to the queue
@@ -28,14 +29,26 @@ class Crawler {
       // Add the URL to the set of seen URLs
       this.seen.add(url);
 
-      // Fetch the page HTML
-      const html = await this.fetchPage(url);
+      if (url.endsWith(".pdf")) {
+        const content = await this.fetchPdf(url);
 
-      // Parse the HTML and add the page to the list of crawled pages
-      this.pages.push({ url, content: this.parseHtml(html) });
+        // Add the pdf to the list of crawled pages
+        this.pages.push({ url, content: content.text });
 
-      // Extract new URLs from the page HTML and add them to the queue
-      this.addNewUrlsToQueue(this.extractUrls(html, url), depth);
+        // Extract new URLs from the page HTML and add them to the queue
+        this.addNewUrlsToQueue(content.links, depth);
+
+      } else {
+
+        // Fetch the page HTML
+        const html = await this.fetchPage(url);
+
+        // Parse the HTML and add the page to the list of crawled pages
+        this.pages.push({ url, content: this.parseHtml(html) });
+
+        // Extract new URLs from the page HTML and add them to the queue
+        this.addNewUrlsToQueue(this.extractUrls(html, url), depth);
+      }
     }
 
     // Return the list of crawled pages
@@ -59,7 +72,15 @@ class Crawler {
   }
 
   private addNewUrlsToQueue(urls: string[], depth: number) {
-    this.queue.push(...urls.map(url => ({ url, depth: depth + 1 })));
+    this.queue.push(...urls.map((url) => ({ url, depth: depth + 1 })));
+  }
+
+  private async fetchPdf(url: string): Promise<any> {
+    const response = await fetch(url)
+    const buffer = await response.arrayBuffer()
+    let pdfData = await pdf(Buffer.from(buffer));
+
+    return pdfData;
   }
 
   private async fetchPage(url: string): Promise<string> {
@@ -68,20 +89,24 @@ class Crawler {
       return await response.text();
     } catch (error) {
       console.error(`Failed to fetch ${url}: ${error}`);
-      return '';
+      return "";
     }
   }
 
   private parseHtml(html: string): string {
     const $ = cheerio.load(html);
-    $('a').removeAttr('href');
+    $("a").removeAttr("href");
     return NodeHtmlMarkdown.translate($.html());
   }
 
   private extractUrls(html: string, baseUrl: string): string[] {
     const $ = cheerio.load(html);
-    const relativeUrls = $('a').map((_, link) => $(link).attr('href')).get() as string[];
-    return relativeUrls.map(relativeUrl => new URL(relativeUrl, baseUrl).href);
+    const relativeUrls = $("a")
+      .map((_, link) => $(link).attr("href"))
+      .get() as string[];
+    return relativeUrls.map(
+      (relativeUrl) => new URL(relativeUrl, baseUrl).href
+    );
   }
 }
 
